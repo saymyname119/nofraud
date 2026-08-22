@@ -23,6 +23,7 @@ from app.database import get_session
 from app.decision.engine import decide
 from app.idempotency import check_cache, store_decision
 from app.velocity import compute_velocity, record_transaction
+from app.sse import broadcaster
 
 logger = logging.getLogger(__name__)
 
@@ -120,5 +121,8 @@ async def razorpay_webhook(
         session, payment, decision.tx_id, payment_id,
         decision.action, decision.p_fraud, decision.reasons
     )
+
+    # 8. Broadcast to dashboard
+    await broadcaster.broadcast("new_payment", {"tx_id": decision.tx_id})
 
     return {"status": "ok", "tx_id": decision.tx_id}
