@@ -1,0 +1,42 @@
+thresholds:
+  amount_buckets:
+  - max_amount: 500
+    min_fraud_prob: 0.87
+  - max_amount: 5000
+    min_fraud_prob: 0.19
+  - max_amount: .inf
+    min_fraud_prob: 0.5
+cost_params:
+  friction_cost: 50
+  review_cost: 5
+  hold_efficacy: 0.9
+  recovery_rate: 0.7
+circuit_breaker:
+  hold_rate_window_seconds: 300
+  hold_rate_threshold: 0.05
+  minimum_sample: 20
+  hysteresis_seconds: 60
+  floor_policy_always_on: true
+idempotency:
+  ttl_seconds: 60
+shadow_mode: false
+compliance:
+  blocklisted_cards: []
+  blocklisted_emails: []
+  allowlisted_emails: []
+  sanctioned_keywords: []
+velocity:
+  window_minutes: 5
+  max_tx_5min: 5
+model:
+  artifact_path: ml/artifact/model.pkl
+  version_path: ml/artifact/version.json
+  require_artifact: true
+step_up:
+  payment_link_expiry_minutes: 15
+  description: Please verify this payment to proceed
+audit:
+  dlq_path: audit_dlq.jsonl
+  genesis_sentinel: '0000000000000000000000000000000000000000000000000000000000000000'
+razorpay:
+  mock_mode: false
