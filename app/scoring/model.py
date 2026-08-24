@@ -122,8 +122,11 @@ class FraudModel:
 
         # Step 2: Isolation Forest anomaly score
         iso = self._model["iso"]
-        # IsolationForest.score_samples returns negative values; more negative = more anomalous
-        iso_raw_score = float(iso.score_samples(X)[0])
+        # Slice X for numeric features only
+        from app.scoring.features import FEATURE_COLUMNS, CATEGORICAL_COLUMNS
+        numeric_indices = [i for i, col in enumerate(FEATURE_COLUMNS) if col not in CATEGORICAL_COLUMNS]
+        X_numeric = X[:, numeric_indices]
+        iso_raw_score = float(iso.score_samples(X_numeric)[0])
         # Normalize to [0,1]: higher = more anomalous
         # Typical range is [-0.7, 0.1]; clamp and invert
         iso_normalized = max(0.0, min(1.0, (-iso_raw_score - 0.0) / 0.7))

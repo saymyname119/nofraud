@@ -53,7 +53,7 @@ async def razorpay_webhook(
     request: Request,
     body: bytes = Depends(verify_signature),
     session: AsyncSession = Depends(get_session),
-) -> dict[str, str]:
+) -> dict[str, Any]:
     """
     Main webhook entrypoint.
     Executes the entire FraudSpike transaction lifecycle.
@@ -78,7 +78,7 @@ async def razorpay_webhook(
     cached = await check_cache(session, payment)
     if cached:
         # Return success immediately; don't re-execute action.
-        return {"status": "ok", "reason": "idempotent_replay"}
+        return {"status": "ok", "tx_id": cached.tx_id, "cached": True}
 
     # 2. Velocity Extraction
     velocity = await compute_velocity(session, payment)
@@ -125,4 +125,5 @@ async def razorpay_webhook(
     # 8. Broadcast to dashboard
     await broadcaster.broadcast("new_payment", {"tx_id": decision.tx_id})
 
+    await session.commit()
     return {"status": "ok", "tx_id": decision.tx_id}

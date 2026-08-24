@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api import webhooks, dashboard
 from app.database import init_db, get_session
 from app.config import get_settings
+from app.scoring.model import init_model
 
 logger = logging.getLogger(__name__)
 
@@ -25,6 +26,7 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI):
     # Startup
     logger.info("Starting FraudSpike API...")
+    init_model("ml/artifact/model.pkl", "ml/artifact/version.json")
     await init_db()
     yield
     # Shutdown
