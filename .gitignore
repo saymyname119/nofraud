@@ -12,9 +12,8 @@ build/
 .env
 
 # ML artifacts (large files)
-ml/artifact/
-*.pkl
-*.joblib
+ml/artifact/*.pkl
+ml/artifact/*.joblib
 
 # Database
 *.db
@@ -23,6 +22,7 @@ ml/artifact/
 audit_dlq.jsonl
 
 # Dataset (too large for git)
+data/
 ieee-fraud-detection/
 
 # Frontend

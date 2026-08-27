@@ -18,7 +18,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import select, func
+from sqlalchemy import select, func, Integer
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.audit.models import AuditRecord

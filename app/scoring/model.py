@@ -127,18 +127,30 @@ class FraudModel:
         numeric_indices = [i for i, col in enumerate(FEATURE_COLUMNS) if col not in CATEGORICAL_COLUMNS]
         X_numeric = X[:, numeric_indices]
         iso_raw_score = float(iso.score_samples(X_numeric)[0])
-        # Normalize to [0,1]: higher = more anomalous
-        # Typical range is [-0.7, 0.1]; clamp and invert
-        iso_normalized = max(0.0, min(1.0, (-iso_raw_score - 0.0) / 0.7))
 
-        # Step 3: Blend (weighted average — XGBoost primary, IF secondary)
-        blend_weight_xgb = 0.75
-        blend_weight_iso = 0.25
-        blended = blend_weight_xgb * xgb_raw + blend_weight_iso * iso_normalized
+        # Normalize using artifact-stored z-score params (falls back to legacy /0.7 if absent)
+        iso_mean = self._model.get("iso_mean", None)
+        iso_std = self._model.get("iso_std", None)
+        if iso_mean is not None and iso_std is not None:
+            # z-score normalization: invert so higher = more anomalous, map to [0,1]
+            iso_z = (iso_mean - iso_raw_score) / iso_std
+            iso_normalized = float(max(0.0, min(1.0, (iso_z + 2) / 4)))
+        else:
+            # Legacy fallback for old artifacts
+            iso_normalized = max(0.0, min(1.0, (-iso_raw_score - 0.0) / 0.7))
 
-        # Step 4: Isotonic calibration
+        # Step 3: Blend using artifact-stored alpha (falls back to 0.75 if absent)
+        blend_alpha = float(self._model.get("blend_alpha", 0.75))
+        blended = blend_alpha * xgb_raw + (1.0 - blend_alpha) * iso_normalized
+
+        # Step 4: Calibration — supports both isotonic and Platt calibrators
         calibrator = self._model["calibrator"]
-        p_fraud = float(calibrator.predict([blended])[0])
+        calibrator_type = self._model.get("calibrator_type", "isotonic")
+        if calibrator_type == "platt" or hasattr(calibrator, "predict_proba"):
+            import numpy as _np
+            p_fraud = float(_np.clip(calibrator.predict_proba([[blended]])[0, 1], 0.0, 1.0))
+        else:
+            p_fraud = float(calibrator.predict([blended])[0])
         p_fraud = max(0.0, min(1.0, p_fraud))  # clamp to [0,1]
 
         # Step 5: SHAP values from XGBoost branch
@@ -154,7 +166,7 @@ class FraudModel:
         }
 
         # Add isolation forest as a virtual feature for reason mapping
-        shap_dict["isolation_forest_score"] = iso_normalized * blend_weight_iso
+        shap_dict["isolation_forest_score"] = iso_normalized * (1.0 - blend_alpha)
 
         reasons = shap_values_to_reasons(shap_dict, top_n=3)
 

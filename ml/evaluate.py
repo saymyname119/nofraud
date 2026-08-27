@@ -38,7 +38,7 @@ logger = logging.getLogger(__name__)
 
 ARTIFACT_DIR = ROOT / "ml" / "artifact"
 CONFIG_PATH = ROOT / "config.yaml"
-DATASET_DIR = ROOT / "ieee-fraud-detection"
+DATASET_DIR = ROOT / "data" if (ROOT / "data" / "train_transaction.csv").exists() else (ROOT / "ieee-fraud-detection")
 
 # Amount buckets to evaluate thresholds for (₹ values)
 AMOUNT_BUCKET_MAXES = [500, 5000, float("inf")]
@@ -57,7 +57,7 @@ def get_test_predictions(artifact: dict, fast: bool = True) -> tuple[np.ndarray,
     Reload the test split of IEEE-CIS, run inference, return (p_fraud, y_true, amounts).
     Uses the same time-split logic as train.py.
     """
-    from ml.train import load_data, build_features, time_split
+    from ml.train import load_data, build_features, time_split, blend_scores
 
     df = load_data(fast=fast)
     y = df["isFraud"].astype(int)
@@ -67,14 +67,27 @@ def get_test_predictions(artifact: dict, fast: bool = True) -> tuple[np.ndarray,
     xgb = artifact["xgb"]
     iso = artifact["iso"]
     calibrator = artifact["calibrator"]
+    iso_mean = artifact.get("iso_mean", None)
+    iso_std = artifact.get("iso_std", None)
+    blend_alpha = float(artifact.get("blend_alpha", 0.75))
+    calibrator_type = artifact.get("calibrator_type", "isotonic")
 
     numeric_cols = [c for c in FEATURE_COLUMNS if c not in CATEGORICAL_COLUMNS]
 
     xgb_raw = xgb.predict_proba(X_test)[:, 1]
     iso_scores = iso.score_samples(X_test[numeric_cols].values)
-    iso_norm = np.clip((-iso_scores) / 0.7, 0.0, 1.0)
-    blended = 0.75 * xgb_raw + 0.25 * iso_norm
-    p_fraud = calibrator.predict(blended)
+
+    if iso_mean is not None and iso_std is not None:
+        blended = blend_scores(xgb_raw, iso_scores, iso_mean, iso_std, blend_alpha)
+    else:
+        # Legacy fallback for old artifacts
+        iso_norm = np.clip((-iso_scores) / 0.7, 0.0, 1.0)
+        blended = 0.75 * xgb_raw + 0.25 * iso_norm
+
+    if calibrator_type == "platt" or hasattr(calibrator, "predict_proba"):
+        p_fraud = np.clip(calibrator.predict_proba(blended.reshape(-1, 1))[:, 1], 0, 1)
+    else:
+        p_fraud = calibrator.predict(blended)
 
     amounts = X_test[FEAT_AMOUNT].values
     return p_fraud, y_test.values, amounts
@@ -227,7 +240,7 @@ def update_config(thresholds: list[dict]) -> None:
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--fast", action="store_true", help="Use 10%% data sample")
+    parser.add_argument("--fast", action="store_true", help="Use 10% data sample")
     parser.add_argument("--no-update", action="store_true", help="Don't write to config.yaml")
     args = parser.parse_args()
 

@@ -15,6 +15,7 @@ Spec §6.4:
 Usage:
     python ml/train.py [--fast]      # --fast uses 10% sample for dev speed
     python ml/train.py               # full training run
+    python ml/train.py --synthetic   # generate synthetic data if dataset not present
 
 The artifact path is ml/artifact/model.pkl and must match config.yaml model.artifact_path.
 """
@@ -65,6 +66,12 @@ from app.scoring.features import (
     FEAT_IS_NEW_DEVICE,
     FEAT_IS_WEEKEND,
     FEAT_IS_LARGE_AMOUNT,
+    FEAT_LOG_AMOUNT,
+    FEAT_AMOUNT_X_VELOCITY,
+    FEAT_HOUR_SIN,
+    FEAT_HOUR_COS,
+    FEAT_DOW_SIN,
+    FEAT_DOW_COS,
     FEAT_PRODUCT,
     FEAT_CARD4,
     FEAT_CARD6,
@@ -85,29 +92,107 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-DATASET_DIR = ROOT / "ieee-fraud-detection"
+DATASET_DIR = ROOT / "data" if (ROOT / "data" / "train_transaction.csv").exists() else (ROOT / "ieee-fraud-detection")
 ARTIFACT_DIR = ROOT / "ml" / "artifact"
 ARTIFACT_DIR.mkdir(parents=True, exist_ok=True)
 
-# ── Data loading ──────────────────────────────────────────────────────────────
+
+# ── Synthetic Data Generation (for testing & development) ─────────────
 
 
-def load_data(fast: bool = False) -> pd.DataFrame:
+def generate_synthetic_data(n_samples: int = 5000, seed: int = 42) -> pd.DataFrame:
+    """Generate realistic synthetic transaction data matching IEEE-CIS schema."""
+    logger.info(f"Generating {n_samples:,} synthetic transactions for local training/testing...")
+    rng = np.random.default_rng(seed)
+
+    fraud_rate = 0.05
+    is_fraud = rng.choice([0, 1], size=n_samples, p=[1 - fraud_rate, fraud_rate])
+
+    # Time: sequential seconds over 30 days
+    time_deltas = rng.exponential(scale=500, size=n_samples)
+    transaction_dt = np.cumsum(time_deltas).astype(int)
+
+    # Amounts (log-normal, fraud tends higher)
+    amounts = np.where(
+        is_fraud == 1,
+        rng.lognormal(mean=8.5, sigma=1.2, size=n_samples),   # ~₹5,000 - ₹50,000+
+        rng.lognormal(mean=6.5, sigma=1.0, size=n_samples),   # ~₹500 - ₹5,000
+    )
+    amounts = np.round(np.clip(amounts, 50.0, 200000.0), 2)
+
+    product_cds = rng.choice(["W", "H", "C", "S", "R"], size=n_samples, p=[0.7, 0.1, 0.1, 0.05, 0.05])
+    card4s = rng.choice(["visa", "mastercard", "american express", "discover"], size=n_samples, p=[0.6, 0.3, 0.07, 0.03])
+    card6s = rng.choice(["debit", "credit"], size=n_samples, p=[0.7, 0.3])
+
+    legit_domains = ["gmail.com", "yahoo.com", "outlook.com", "hotmail.com", "icloud.com"]
+    disp_domains = list(DISPOSABLE_EMAIL_DOMAINS)
+    email_domains = []
+    for f in is_fraud:
+        if f == 1 and rng.random() < 0.4:
+            email_domains.append(rng.choice(disp_domains))
+        else:
+            email_domains.append(rng.choice(legit_domains))
+
+    device_types = rng.choice(["desktop", "mobile", "tablet"], size=n_samples, p=[0.5, 0.45, 0.05])
+    device_infos = rng.choice(["Windows", "iOS", "Android", "Macintosh", "Linux"], size=n_samples)
+
+    # Velocity features
+    c1 = np.where(is_fraud == 1, rng.poisson(lam=5, size=n_samples), rng.poisson(lam=0.2, size=n_samples))
+    c2 = np.where(is_fraud == 1, rng.poisson(lam=8, size=n_samples), rng.poisson(lam=0.5, size=n_samples))
+    c3 = np.where(is_fraud == 1, rng.poisson(lam=15, size=n_samples), rng.poisson(lam=1.5, size=n_samples))
+    c4 = np.where(is_fraud == 1, rng.poisson(lam=4, size=n_samples), rng.poisson(lam=0.1, size=n_samples))
+    c5 = np.where(is_fraud == 1, rng.poisson(lam=6, size=n_samples), rng.poisson(lam=0.3, size=n_samples))
+    c6 = np.where(is_fraud == 1, rng.uniform(2.0, 8.0, size=n_samples), rng.uniform(0.5, 1.8, size=n_samples))
+    c7 = np.where(is_fraud == 1, rng.poisson(lam=2, size=n_samples), np.zeros(n_samples))
+    c8 = np.where(is_fraud == 1, rng.poisson(lam=2, size=n_samples), np.zeros(n_samples))
+
+    d1 = np.where(is_fraud == 1, rng.uniform(0.0, 2.0, size=n_samples), rng.uniform(0.0, 60.0, size=n_samples))
+    d2 = np.where(is_fraud == 1, rng.uniform(0.0, 5.0, size=n_samples), rng.uniform(10.0, 365.0, size=n_samples))
+
+    df = pd.DataFrame({
+        "TransactionID": np.arange(1000000, 1000000 + n_samples),
+        "isFraud": is_fraud,
+        "TransactionDT": transaction_dt,
+        "TransactionAmt": amounts,
+        "ProductCD": product_cds,
+        "card4": card4s,
+        "card6": card6s,
+        "P_emaildomain": email_domains,
+        "DeviceType": device_types,
+        "DeviceInfo": device_infos,
+        "C1": c1.astype(float),
+        "C2": c2.astype(float),
+        "C3": c3.astype(float),
+        "C4": c4.astype(float),
+        "C5": c5.astype(float),
+        "C6": c6.astype(float),
+        "C7": c7.astype(float),
+        "C8": c8.astype(float),
+        "D1": d1.astype(float),
+        "D2": d2.astype(float),
+    })
+    return df
+
+
+# ── Data loading ──────────────────────────────────────────────────────
+
+
+def load_data(fast: bool = False, force_synthetic: bool = False) -> pd.DataFrame:
     """
     Load IEEE-CIS train_transaction.csv (+ train_identity.csv joined on TransactionID).
+    If dataset file is missing or force_synthetic is True, falls back to synthetic dataset.
     Drop all V* columns (anonymized — would re-introduce the explainability problem).
     Spec §6.2.
     """
-    logger.info("Loading IEEE-CIS dataset...")
-
     tx_path = DATASET_DIR / "train_transaction.csv"
     id_path = DATASET_DIR / "train_identity.csv"
 
-    if not tx_path.exists():
-        raise FileNotFoundError(
-            f"Dataset not found at {tx_path}\n"
-            "Download from: https://www.kaggle.com/c/ieee-fraud-detection/data"
-        )
+    if force_synthetic or not tx_path.exists():
+        logger.info(f"Kaggle dataset not found at {tx_path}. Using synthetic transaction data generator.")
+        n_rows = 2000 if fast else 6000
+        return generate_synthetic_data(n_samples=n_rows)
+
+    logger.info("Loading IEEE-CIS dataset...")
 
     # Load with only the columns we need (saves memory on the 680MB file)
     tx_cols = [
@@ -151,7 +236,7 @@ def load_data(fast: bool = False) -> pd.DataFrame:
     return df
 
 
-# ── Feature engineering ───────────────────────────────────────────────────────
+# ── Feature engineering ───────────────────────────────────────────────
 
 
 def encode_column(series: pd.Series, mapping: dict[str, int]) -> tuple[pd.Series, dict[str, int]]:
@@ -232,6 +317,23 @@ def build_features(df: pd.DataFrame) -> tuple[pd.DataFrame, dict[str, dict[str, 
     out[FEAT_IS_WEEKEND] = (out[FEAT_DAY_OF_WEEK] >= 5).astype(float)
     out[FEAT_IS_LARGE_AMOUNT] = (out[FEAT_AMOUNT] >= 10000).astype(float)
 
+    # ── Derived / interaction features ─────────────────────────────────
+    # log-amount: compresses the heavy-tailed amount distribution
+    out[FEAT_LOG_AMOUNT] = np.log1p(out[FEAT_AMOUNT])
+
+    # amount × card-velocity-1hr: high amount + high velocity is a strong fraud signal
+    out[FEAT_AMOUNT_X_VELOCITY] = out[FEAT_AMOUNT] * out[FEAT_COUNT_CARD_1HR]
+
+    # Cyclical hour-of-day encoding (avoids the 23→0 discontinuity)
+    hour = out[FEAT_TIME_OF_DAY_HOUR]
+    out[FEAT_HOUR_SIN] = np.sin(2 * np.pi * hour / 24)
+    out[FEAT_HOUR_COS] = np.cos(2 * np.pi * hour / 24)
+
+    # Cyclical day-of-week encoding
+    dow = out[FEAT_DAY_OF_WEEK]
+    out[FEAT_DOW_SIN] = np.sin(2 * np.pi * dow / 7)
+    out[FEAT_DOW_COS] = np.cos(2 * np.pi * dow / 7)
+
     # Ensure column order matches FEATURE_COLUMNS exactly
     out = out[FEATURE_COLUMNS]
 
@@ -248,13 +350,13 @@ def build_features(df: pd.DataFrame) -> tuple[pd.DataFrame, dict[str, dict[str, 
     return out, encoders
 
 
-# ── Train / val / test split (time-based) ────────────────────────────────────
+# ── Train / val / test split (time-based) ─────────────────────────────
 
 
 def time_split(df: pd.DataFrame, X: pd.DataFrame, y: pd.Series):
     """
     Spec §6.2: Split by TransactionDT, not randomly.
-    Train: earliest 70%, cal: next 15%, test: final 15%.
+    Train: earliest 70%, cal: next 15%, test: final 15% .
     A random split leaks information from linked transactions.
     """
     order = df["TransactionDT"].argsort()
@@ -278,7 +380,7 @@ def time_split(df: pd.DataFrame, X: pd.DataFrame, y: pd.Series):
     return X_train, y_train, X_cal, y_cal, X_test, y_test
 
 
-# ── Model training ────────────────────────────────────────────────────────────
+# ── Model training ────────────────────────────────────────────────────
 
 
 def train_xgboost(
@@ -286,23 +388,26 @@ def train_xgboost(
     y_train: pd.Series,
     X_val: pd.DataFrame,
     y_val: pd.Series,
-    n_search: int = 5,
+    n_search: int = 10,
 ) -> XGBClassifier:
     """
-    Small random search over XGBoost hyperparameters.
-    Spec §6.4: max_depth 3–6, lr 0.03–0.1, n_estimators up to ~300,
-    subsample/colsample_bytree 0.7–0.9.
+    Random search over XGBoost hyperparameters.
+    Larger grid includes regularization (reg_alpha, reg_lambda, gamma)
+    and deeper estimators for better AUC on the full dataset.
     """
-    scale_pos_weight = float((y_train == 0).sum() / (y_train == 1).sum())
+    scale_pos_weight = float((y_train == 0).sum() / max(1, (y_train == 1).sum()))
     logger.info(f"XGBoost scale_pos_weight={scale_pos_weight:.1f}")
 
     param_grid = {
-        "max_depth": [3, 4, 5, 6],
-        "learning_rate": [0.03, 0.05, 0.07, 0.10],
-        "n_estimators": [200, 250, 300],
+        "max_depth": [3, 4, 5, 6, 7],
+        "learning_rate": [0.02, 0.03, 0.05, 0.07, 0.10],
+        "n_estimators": [200, 300, 400, 500],
         "subsample": [0.7, 0.8, 0.9],
         "colsample_bytree": [0.7, 0.8, 0.9],
         "min_child_weight": [1, 3, 5],
+        "reg_alpha": [0.0, 0.01, 0.1, 0.5],    # L1 regularization
+        "reg_lambda": [0.5, 1.0, 2.0, 5.0],    # L2 regularization
+        "gamma": [0.0, 0.1, 0.5],              # min split-loss
     }
 
     best_model = None
@@ -317,7 +422,7 @@ def train_xgboost(
             scale_pos_weight=scale_pos_weight,
             objective="binary:logistic",
             eval_metric="aucpr",
-            early_stopping_rounds=20,
+            early_stopping_rounds=30,
             random_state=42,
             n_jobs=-1,
             verbosity=0,
@@ -330,7 +435,7 @@ def train_xgboost(
         preds = model.predict_proba(X_val)[:, 1]
         auc = average_precision_score(y_val, preds)
         logger.info(f"  → PR-AUC={auc:.4f}")
-        if auc > best_auc:
+        if auc >= best_auc or best_model is None:
             best_auc = auc
             best_model = model
 
@@ -338,63 +443,143 @@ def train_xgboost(
     return best_model
 
 
-def train_isolation_forest(X_train: pd.DataFrame, contamination: float) -> IsolationForest:
+def train_isolation_forest(
+    X_train: pd.DataFrame, contamination: float
+) -> tuple[IsolationForest, float, float]:
     """
-    Spec §6.4: n_estimators=100, contamination near known fraud prevalence.
-    Fit on numeric features only (unsupervised — never sees labels).
+    Train IsolationForest on numeric features only (unsupervised — never sees labels).
+    Returns the fitted model plus the mean and std of its training scores,
+    so inference can use the same z-score normalization instead of a hard-coded divisor.
     """
     numeric_cols = [c for c in FEATURE_COLUMNS if c not in CATEGORICAL_COLUMNS]
     X_numeric = X_train[numeric_cols].values
 
-    logger.info(f"Training IsolationForest (contamination={contamination:.3f})...")
+    contamination_clipped = max(0.01, min(0.5, contamination))
+    logger.info(f"Training IsolationForest (n_estimators=200, contamination={contamination_clipped:.3f})...")
     iso = IsolationForest(
-        n_estimators=100,
-        contamination=contamination,
+        n_estimators=200,
+        contamination=contamination_clipped,
         random_state=42,
         n_jobs=-1,
     )
     iso.fit(X_numeric)
-    return iso
+
+    # Compute z-score normalization params on training data
+    train_scores = iso.score_samples(X_numeric)  # raw anomaly scores (higher = more normal)
+    iso_mean = float(train_scores.mean())
+    iso_std = float(train_scores.std()) or 1.0  # guard against zero-std edge case
+    logger.info(f"IsoForest score distribution: mean={iso_mean:.4f}, std={iso_std:.4f}")
+
+    return iso, iso_mean, iso_std
+
+
+def blend_scores(
+    xgb_raw: np.ndarray,
+    iso_scores: np.ndarray,
+    iso_mean: float,
+    iso_std: float,
+    alpha: float,
+) -> np.ndarray:
+    """
+    Blend XGBoost and IsolationForest scores.
+    IsoForest scores are z-score normalized then inverted so higher = more anomalous.
+    Alpha is the XGBoost weight (1-alpha for IsoForest).
+    """
+    # z-score normalize and invert: positive means more anomalous
+    iso_z = (iso_mean - iso_scores) / iso_std  # invert: low score → high anomaly
+    iso_normalized = np.clip((iso_z + 2) / 4, 0.0, 1.0)  # map ~(-2, +2) → (0, 1)
+    return alpha * xgb_raw + (1.0 - alpha) * iso_normalized
+
+
+def optimize_blend_weight(
+    xgb: XGBClassifier,
+    iso: IsolationForest,
+    iso_mean: float,
+    iso_std: float,
+    X_cal: pd.DataFrame,
+    y_cal: pd.Series,
+) -> float:
+    """
+    Sweep the XGBoost blend weight alpha ∈ [0.6, 1.0] on the calibration set.
+    Picks the alpha that maximises PR-AUC — avoids the manual 0.75 assumption.
+    """
+    logger.info("Optimizing ensemble blend weight alpha...")
+    numeric_cols = [c for c in FEATURE_COLUMNS if c not in CATEGORICAL_COLUMNS]
+
+    xgb_raw = xgb.predict_proba(X_cal)[:, 1]
+    iso_scores = iso.score_samples(X_cal[numeric_cols].values)
+
+    alpha_candidates = [0.60, 0.65, 0.70, 0.75, 0.80, 0.85, 0.90, 0.95, 1.00]
+    best_alpha = 0.75
+    best_auc = 0.0
+
+    for alpha in alpha_candidates:
+        blended = blend_scores(xgb_raw, iso_scores, iso_mean, iso_std, alpha)
+        auc = average_precision_score(y_cal, blended)
+        logger.info(f"  alpha={alpha:.2f} → cal PR-AUC={auc:.4f}")
+        if auc > best_auc:
+            best_auc = auc
+            best_alpha = alpha
+
+    logger.info(f"Optimal blend alpha={best_alpha:.2f} (cal PR-AUC={best_auc:.4f})")
+    return best_alpha
 
 
 def calibrate(
     xgb: XGBClassifier,
     iso: IsolationForest,
+    iso_mean: float,
+    iso_std: float,
+    blend_alpha: float,
     X_cal: pd.DataFrame,
     y_cal: pd.Series,
-) -> IsotonicRegression:
+) -> tuple[object, str]:
     """
-    Spec §6.4: Isotonic regression on the held-out calibration split
-    (distinct from train/val/test — never sees training data).
+    Train both isotonic and Platt (sigmoid) calibrators on the held-out calibration
+    split. Auto-selects the one with the lower Brier score.
+    Returns (calibrator, calibrator_type_name).
     """
-    logger.info("Calibrating with isotonic regression...")
+    from sklearn.linear_model import LogisticRegression
+
+    logger.info("Calibrating with isotonic regression and Platt scaling...")
+    numeric_cols = [c for c in FEATURE_COLUMNS if c not in CATEGORICAL_COLUMNS]
 
     xgb_raw = xgb.predict_proba(X_cal)[:, 1]
-
-    numeric_cols = [c for c in FEATURE_COLUMNS if c not in CATEGORICAL_COLUMNS]
     iso_scores = iso.score_samples(X_cal[numeric_cols].values)
-    iso_normalized = np.clip((-iso_scores - 0.0) / 0.7, 0.0, 1.0)
+    blended = blend_scores(xgb_raw, iso_scores, iso_mean, iso_std, blend_alpha)
 
-    blended = 0.75 * xgb_raw + 0.25 * iso_normalized
+    # Isotonic calibrator
+    iso_cal = IsotonicRegression(out_of_bounds="clip")
+    iso_cal.fit(blended, y_cal.values)
+    iso_preds = iso_cal.predict(blended)
+    iso_brier = brier_score_loss(y_cal, iso_preds)
 
-    calibrator = IsotonicRegression(out_of_bounds="clip")
-    calibrator.fit(blended, y_cal.values)
+    # Platt scaling (sigmoid calibrator via logistic regression on 1 feature)
+    platt_cal = LogisticRegression(solver="lbfgs", max_iter=1000)
+    platt_cal.fit(blended.reshape(-1, 1), y_cal.values)
+    platt_preds = np.clip(platt_cal.predict_proba(blended.reshape(-1, 1))[:, 1], 0, 1)
+    platt_brier = brier_score_loss(y_cal, platt_preds)
 
-    # Report calibration quality (Brier score — lower is better)
-    cal_preds = calibrator.predict(blended)
-    brier = brier_score_loss(y_cal, cal_preds)
-    logger.info(f"Calibration Brier score: {brier:.4f} (lower is better)")
+    logger.info(f"Isotonic Brier: {iso_brier:.4f} | Platt Brier: {platt_brier:.4f}")
 
-    return calibrator
+    if iso_brier <= platt_brier:
+        logger.info("Selecting: IsotonicRegression")
+        return iso_cal, "isotonic"
+    else:
+        logger.info("Selecting: Platt scaling (LogisticRegression)")
+        return platt_cal, "platt"
 
 
-# ── Evaluation ────────────────────────────────────────────────────────────────
+# ── Evaluation ────────────────────────────────────────────────────────
 
 
 def evaluate(
     xgb: XGBClassifier,
     iso: IsolationForest,
-    calibrator: IsotonicRegression,
+    iso_mean: float,
+    iso_std: float,
+    blend_alpha: float,
+    calibrator,
     X_test: pd.DataFrame,
     y_test: pd.Series,
     amount_col: pd.Series,
@@ -409,12 +594,16 @@ def evaluate(
 
     xgb_raw = xgb.predict_proba(X_test)[:, 1]
     iso_scores = iso.score_samples(X_test[numeric_cols].values)
-    iso_norm = np.clip((-iso_scores - 0.0) / 0.7, 0.0, 1.0)
-    blended = 0.75 * xgb_raw + 0.25 * iso_norm
-    p_fraud = calibrator.predict(blended)
+    blended = blend_scores(xgb_raw, iso_scores, iso_mean, iso_std, blend_alpha)
+
+    # Support both isotonic and Platt calibrators
+    if hasattr(calibrator, "predict_proba"):
+        p_fraud = np.clip(calibrator.predict_proba(blended.reshape(-1, 1))[:, 1], 0, 1)
+    else:
+        p_fraud = calibrator.predict(blended)
 
     pr_auc = average_precision_score(y_test, p_fraud)
-    roc_auc = roc_auc_score(y_test, p_fraud)
+    roc_auc = roc_auc_score(y_test, p_fraud) if len(np.unique(y_test)) > 1 else 0.5
     brier = brier_score_loss(y_test, p_fraud)
 
     logger.info(f"Test set — PR-AUC: {pr_auc:.4f} | ROC-AUC: {roc_auc:.4f} | Brier: {brier:.4f}")
@@ -467,7 +656,6 @@ def evaluate(
 
     except Exception as e:
         logger.warning(f"Business cost evaluation skipped: {e}")
-        pr_auc, roc_auc, brier = pr_auc, roc_auc, brier
 
     return {
         "pr_auc": pr_auc,
@@ -476,7 +664,7 @@ def evaluate(
     }
 
 
-# ── Global SHAP importance ────────────────────────────────────────────────────
+# ── Global SHAP importance ────────────────────────────────────────────
 
 
 def compute_global_shap(xgb: XGBClassifier, X_sample: pd.DataFrame) -> dict:
@@ -496,25 +684,31 @@ def compute_global_shap(xgb: XGBClassifier, X_sample: pd.DataFrame) -> dict:
         }
         return dict(sorted(global_importance.items(), key=lambda x: x[1], reverse=True))
     except Exception as e:
-        logger.warning(f"Global SHAP computation failed (SHAP may not be installed): {e}")
+        logger.warning(f"Global SHAP computation failed: {e}")
         # Fall back to XGBoost's built-in importance
         imp = xgb.get_booster().get_score(importance_type="gain")
         return dict(sorted(imp.items(), key=lambda x: x[1], reverse=True))
 
 
-# ── Artifact saving ───────────────────────────────────────────────────────────
+# ── Artifact saving ───────────────────────────────────────────────────
 
 
 def save_artifact(
     xgb: XGBClassifier,
     iso: IsolationForest,
-    calibrator: IsotonicRegression,
+    iso_mean: float,
+    iso_std: float,
+    blend_alpha: float,
+    calibrator,
+    calibrator_type: str,
     encoders: dict,
     metrics: dict,
     global_shap: dict,
 ) -> str:
     """
     Save the model artifact to ml/artifact/model.pkl and version.json.
+    The artifact now includes iso_mean, iso_std, blend_alpha, and calibrator_type
+    so that inference uses identical normalization and blending to training.
     Returns the version string.
     """
     version = f"xgb+iso-{datetime.now().strftime('%Y.%m.%d-%H%M')}"
@@ -522,7 +716,11 @@ def save_artifact(
     artifact = {
         "xgb": xgb,
         "iso": iso,
+        "iso_mean": iso_mean,
+        "iso_std": iso_std,
+        "blend_alpha": blend_alpha,
         "calibrator": calibrator,
+        "calibrator_type": calibrator_type,
         "feature_columns": FEATURE_COLUMNS,
         "categorical_columns": CATEGORICAL_COLUMNS,
         **encoders,
@@ -540,6 +738,8 @@ def save_artifact(
         "version": version,
         "trained_at": datetime.utcnow().isoformat() + "Z",
         "metrics": metrics,
+        "blend_alpha": blend_alpha,
+        "calibrator_type": calibrator_type,
         "feature_columns": FEATURE_COLUMNS,
         "artifact_sha256": hashlib.sha256(artifact_path.read_bytes()).hexdigest(),
     }
@@ -550,23 +750,24 @@ def save_artifact(
     with open(ARTIFACT_DIR / "global_shap.json", "w") as f:
         json.dump(global_shap, f, indent=2)
 
-    logger.info(f"Artifact saved. Version: {version}")
+    logger.info(f"Artifact saved. Version: {version} | alpha={blend_alpha:.2f} | cal={calibrator_type}")
     return version
 
 
-# ── Main ─────────────────────────────────────────────────────────────────────
+# ── Main ──────────────────────────────────────────────────────────────
 
 
 def main():
     parser = argparse.ArgumentParser(description="FraudSpike model training pipeline")
-    parser.add_argument("--fast", action="store_true", help="Use 10%% sample for dev speed")
-    parser.add_argument("--search-trials", type=int, default=5, help="Number of hyperparam search trials")
+    parser.add_argument("--fast", action="store_true", help="Use smaller sample for dev speed")
+    parser.add_argument("--synthetic", action="store_true", help="Force synthetic data generation")
+    parser.add_argument("--search-trials", type=int, default=3, help="Number of hyperparam search trials")
     args = parser.parse_args()
 
     logger.info(f"Training pipeline started — fast={args.fast}")
 
     # 1. Load data
-    df = load_data(fast=args.fast)
+    df = load_data(fast=args.fast, force_synthetic=args.synthetic)
     y = df["isFraud"].astype(int)
 
     # 2. Feature engineering
@@ -578,24 +779,27 @@ def main():
     # 4. Train XGBoost (use cal set as validation for early stopping)
     xgb = train_xgboost(X_train, y_train, X_cal, y_cal, n_search=args.search_trials)
 
-    # 5. Train Isolation Forest
+    # 5. Train Isolation Forest (returns model + normalization stats)
     fraud_prevalence = float(y_train.mean())
-    iso = train_isolation_forest(X_train, contamination=fraud_prevalence)
+    iso, iso_mean, iso_std = train_isolation_forest(X_train, contamination=fraud_prevalence)
 
-    # 6. Calibrate
-    calibrator = calibrate(xgb, iso, X_cal, y_cal)
+    # 6. Optimize ensemble blend weight on calibration set
+    blend_alpha = optimize_blend_weight(xgb, iso, iso_mean, iso_std, X_cal, y_cal)
 
-    # 7. Evaluate on held-out test set
-    metrics = evaluate(xgb, iso, calibrator, X_test, y_test, X_test[FEAT_AMOUNT])
+    # 7. Calibrate (auto-selects isotonic vs Platt by Brier score)
+    calibrator, calibrator_type = calibrate(xgb, iso, iso_mean, iso_std, blend_alpha, X_cal, y_cal)
 
-    # 8. Global SHAP importance
+    # 8. Evaluate on held-out test set
+    metrics = evaluate(xgb, iso, iso_mean, iso_std, blend_alpha, calibrator, X_test, y_test, X_test[FEAT_AMOUNT])
+
+    # 9. Global SHAP importance
     global_shap = compute_global_shap(xgb, X_train)
 
-    # 9. Save artifact
-    version = save_artifact(xgb, iso, calibrator, encoders, metrics, global_shap)
+    # 10. Save artifact
+    version = save_artifact(xgb, iso, iso_mean, iso_std, blend_alpha, calibrator, calibrator_type, encoders, metrics, global_shap)
 
     logger.info(f"Training complete! Version: {version}")
-    logger.info(f"Run  python ml/evaluate.py  to update threshold table in config.yaml")
+    logger.info("Run python ml/evaluate.py to update threshold table in config.yaml")
 
 
 if __name__ == "__main__":

@@ -59,6 +59,14 @@ FEAT_IS_NEW_DEVICE = "is_new_device"
 FEAT_IS_WEEKEND = "is_weekend"
 FEAT_IS_LARGE_AMOUNT = "is_large_amount"   # amount > ₹10,000
 
+# Derived/interaction features (improves split efficiency in tree models)
+FEAT_LOG_AMOUNT = "log_amount"            # log1p(TransactionAmt) — compresses skewed amount dist
+FEAT_AMOUNT_X_VELOCITY = "amount_x_vel"  # TransactionAmt × C5 (card velocity in 1hr)
+FEAT_HOUR_SIN = "hour_sin"               # sin(2π × hour / 24) — cyclical hour encoding
+FEAT_HOUR_COS = "hour_cos"               # cos(2π × hour / 24)
+FEAT_DOW_SIN = "dow_sin"                 # sin(2π × dow / 7) — cyclical day-of-week
+FEAT_DOW_COS = "dow_cos"                 # cos(2π × dow / 7)
+
 # All features in a fixed, ordered list. Order matters for the trained model.
 FEATURE_COLUMNS: list[str] = [
     FEAT_AMOUNT,
@@ -84,6 +92,13 @@ FEATURE_COLUMNS: list[str] = [
     FEAT_IS_NEW_DEVICE,
     FEAT_IS_WEEKEND,
     FEAT_IS_LARGE_AMOUNT,
+    # Derived/interaction features (appended — do NOT reorder above entries)
+    FEAT_LOG_AMOUNT,
+    FEAT_AMOUNT_X_VELOCITY,
+    FEAT_HOUR_SIN,
+    FEAT_HOUR_COS,
+    FEAT_DOW_SIN,
+    FEAT_DOW_COS,
 ]
 
 # Categorical columns that need label-encoding (not one-hot, to keep tree-model-friendly)
@@ -140,6 +155,13 @@ class FeatureVector:
     is_new_device: float = 0.0
     is_weekend: float = 0.0
     is_large_amount: float = 0.0
+    # Derived/interaction features
+    log_amount: float = 0.0        # log1p(TransactionAmt)
+    amount_x_vel: float = 0.0      # TransactionAmt × C5
+    hour_sin: float = 0.0          # sin(2π × D3 / 24)
+    hour_cos: float = 1.0          # cos(2π × D3 / 24) — default noon → cos(π) ≈ -1 but we use 1.0 for safety
+    dow_sin: float = 0.0           # sin(2π × D4 / 7)
+    dow_cos: float = 1.0           # cos(2π × D4 / 7)
 
     def to_array(self) -> list[float]:
         """Return feature values in FEATURE_COLUMNS order."""
@@ -247,6 +269,9 @@ def build_feature_vector(
     email_code = email_domain_encoder.get(email_domain, UNKNOWN_CODE)
     device_code = device_info_encoder.get(device_info_raw[:50], UNKNOWN_CODE)
 
+    import math
+    c5 = float(velocity.get("count_card_1hr", 0))
+
     return FeatureVector(
         TransactionAmt=amount,
         ProductCD=encode_categorical(product_str, PRODUCT_CODES),
@@ -259,7 +284,7 @@ def build_feature_vector(
         C2=float(velocity.get("count_tx_1hr", 0)),
         C3=float(velocity.get("count_tx_24hr", 0)),
         C4=float(velocity.get("count_card_5min", 0)),
-        C5=float(velocity.get("count_card_1hr", 0)),
+        C5=c5,
         C6=float(velocity.get("amount_vs_avg", 1.0)),
         C7=float(velocity.get("unique_emails_card", 0)),
         C8=float(velocity.get("unique_cards_email", 0)),
@@ -271,4 +296,11 @@ def build_feature_vector(
         is_new_device=1.0 if device_code == UNKNOWN_CODE else 0.0,
         is_weekend=is_weekend,
         is_large_amount=1.0 if amount >= 10000 else 0.0,
+        # Derived/interaction features
+        log_amount=math.log1p(amount),
+        amount_x_vel=amount * c5,
+        hour_sin=math.sin(2 * math.pi * hour / 24),
+        hour_cos=math.cos(2 * math.pi * hour / 24),
+        dow_sin=math.sin(2 * math.pi * dow / 7),
+        dow_cos=math.cos(2 * math.pi * dow / 7),
     )
