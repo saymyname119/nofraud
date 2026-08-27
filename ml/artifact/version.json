@@ -1,0 +1,43 @@
+{
+  "version": "xgb+iso-2026.08.25-1558",
+  "trained_at": "2026-08-25T10:28:41.238720Z",
+  "metrics": {
+    "pr_auc": 0.3704048440210417,
+    "roc_auc": 0.84650505621348,
+    "brier": 0.02603283299076909
+  },
+  "blend_alpha": 1.0,
+  "calibrator_type": "isotonic",
+  "feature_columns": [
+    "TransactionAmt",
+    "ProductCD",
+    "card4",
+    "card6",
+    "P_emaildomain",
+    "DeviceType",
+    "DeviceInfo",
+    "C1",
+    "C2",
+    "C3",
+    "C4",
+    "C5",
+    "C6",
+    "C7",
+    "C8",
+    "D1",
+    "D2",
+    "D3",
+    "D4",
+    "is_disposable_email",
+    "is_new_device",
+    "is_weekend",
+    "is_large_amount",
+    "log_amount",
+    "amount_x_vel",
+    "hour_sin",
+    "hour_cos",
+    "dow_sin",
+    "dow_cos"
+  ],
+  "artifact_sha256": "23dd91f7e16135ae8c8bdfd9899bc70e9d891270ebd61c91bae6d2ff85a89a3f"
+}
