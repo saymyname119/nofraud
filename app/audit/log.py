@@ -14,7 +14,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -43,7 +43,7 @@ def _to_dlq(payload: dict, error: str) -> None:
     """Write a failed record to the local dead-letter queue (spec §A.9)."""
     cfg = get_audit_cfg()
     dlq_path = Path(cfg.get("dlq_path", "audit_dlq.jsonl"))
-    entry = {"error": error, "timestamp": datetime.utcnow().isoformat() + "Z", **payload}
+    entry = {"error": error, "timestamp": datetime.now(timezone.utc).isoformat() + "Z", **payload}
     try:
         with open(dlq_path, "a", encoding="utf-8") as f:
             f.write(_canonical_json(entry) + "\n")
@@ -84,13 +84,13 @@ async def append_decided(
     Returns the created record.
     """
     previous_hash = await _get_last_hash(session)
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
 
     fields: dict[str, Any] = {
         "record_type": "DECIDED",
         "tx_id": tx_id,
         "payment_id": payment_id,
-        "timestamp": now.isoformat() + "Z",
+        "timestamp": now.replace(tzinfo=None).isoformat() + "Z",
         "amount": amount,
         "p_fraud": round(p_fraud, 6),
         "action": action,
@@ -111,7 +111,7 @@ async def append_decided(
         record_type="DECIDED",
         tx_id=tx_id,
         payment_id=payment_id,
-        timestamp=now,
+        timestamp=now.replace(tzinfo=None),
         amount=amount,
         p_fraud=p_fraud,
         action=action,
@@ -152,13 +152,13 @@ async def append_action_result(
     Append an ACTION_RESULT record. Called AFTER the Razorpay call completes.
     """
     previous_hash = await _get_last_hash(session)
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
 
     fields: dict[str, Any] = {
         "record_type": "ACTION_RESULT",
         "tx_id": tx_id,
         "payment_id": payment_id,
-        "timestamp": now.isoformat() + "Z",
+        "timestamp": now.replace(tzinfo=None).isoformat() + "Z",
         "action_status": action_status,
         "razorpay_response": razorpay_response or {},
         "previous_log_hash": previous_hash,
@@ -171,7 +171,7 @@ async def append_action_result(
         record_type="ACTION_RESULT",
         tx_id=tx_id,
         payment_id=payment_id,
-        timestamp=now,
+        timestamp=now.replace(tzinfo=None),
         action_status=action_status,
         razorpay_response=json.dumps(razorpay_response or {}),
         previous_log_hash=previous_hash,

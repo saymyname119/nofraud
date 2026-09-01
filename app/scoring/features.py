@@ -238,7 +238,7 @@ def build_feature_vector(
         device_type_str = "tablet"
 
     # Time features
-    now = datetime.datetime.utcnow()
+    now = datetime.datetime.now(datetime.timezone.utc)
     hour = now.hour
     dow = now.weekday()  # 0=Monday
     is_weekend = 1.0 if dow >= 5 else 0.0
