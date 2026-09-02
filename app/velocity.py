@@ -14,7 +14,7 @@ Features computed (matching FEATURE_COLUMNS in features.py):
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from sqlalchemy import select, func
@@ -40,12 +40,15 @@ async def compute_velocity(
     amount_paise = int(payment.get("amount", 0))
     amount = amount_paise / 100.0
 
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
+
+    # Use naive UTC for window boundaries — the DB stores naive timestamps
+    now_naive = now.replace(tzinfo=None)
 
     windows = {
-        "5min": now - timedelta(minutes=5),
-        "1hr":  now - timedelta(hours=1),
-        "24hr": now - timedelta(hours=24),
+        "5min": now_naive - timedelta(minutes=5),
+        "1hr":  now_naive - timedelta(hours=1),
+        "24hr": now_naive - timedelta(hours=24),
     }
 
     async def count_by_email(since: datetime) -> int:
@@ -84,7 +87,7 @@ async def compute_velocity(
         r = await session.execute(
             select(func.count(func.distinct(VelocityRecord.email))).select_from(VelocityRecord)
             .where(VelocityRecord.card_last4 == card_last4)
-            .where(VelocityRecord.timestamp >= now - timedelta(hours=24))
+            .where(VelocityRecord.timestamp >= now_naive - timedelta(hours=24))
         )
         return r.scalar_one() or 0
 
@@ -94,7 +97,7 @@ async def compute_velocity(
         r = await session.execute(
             select(func.count(func.distinct(VelocityRecord.card_last4))).select_from(VelocityRecord)
             .where(VelocityRecord.email == email)
-            .where(VelocityRecord.timestamp >= now - timedelta(hours=24))
+            .where(VelocityRecord.timestamp >= now_naive - timedelta(hours=24))
         )
         return r.scalar_one() or 0
 
@@ -108,7 +111,7 @@ async def compute_velocity(
         last = r.scalar_one()
         if last is None:
             return -1.0
-        return (now - last).total_seconds() / 86400.0
+        return (now.replace(tzinfo=None) - last).total_seconds() / 86400.0
 
     async def days_since_first() -> float:
         if not email:
@@ -120,7 +123,7 @@ async def compute_velocity(
         first = r.scalar_one()
         if first is None:
             return -1.0
-        return (now - first).total_seconds() / 86400.0
+        return (now.replace(tzinfo=None) - first).total_seconds() / 86400.0
 
     # Run all queries
     c_tx_5min  = await count_by_email(windows["5min"])

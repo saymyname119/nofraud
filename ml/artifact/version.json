@@ -1,12 +1,12 @@
 {
-  "version": "xgb+iso-2026.08.25-1558",
-  "trained_at": "2026-08-25T10:28:41.238720Z",
+  "version": "xgb+iso-2026.09.02-2355",
+  "trained_at": "2026-09-02T18:25:41.087871Z",
   "metrics": {
-    "pr_auc": 0.3704048440210417,
-    "roc_auc": 0.84650505621348,
-    "brier": 0.02603283299076909
+    "pr_auc": 1.0,
+    "roc_auc": 1.0,
+    "brier": 0.0017634056119501256
   },
-  "blend_alpha": 1.0,
+  "blend_alpha": 0.6,
   "calibrator_type": "isotonic",
   "feature_columns": [
     "TransactionAmt",
@@ -39,5 +39,5 @@
     "dow_sin",
     "dow_cos"
   ],
-  "artifact_sha256": "23dd91f7e16135ae8c8bdfd9899bc70e9d891270ebd61c91bae6d2ff85a89a3f"
+  "artifact_sha256": "0ebea5f500cc3f1241a204f46783146254e3473f2809f91362550dbf99c678b1"
 }

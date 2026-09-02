@@ -17,7 +17,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from sqlalchemy import select, delete
@@ -52,7 +52,8 @@ async def check_cache(
     ttl = timedelta(seconds=cfg.get("ttl_seconds", 60))
     key = _payload_hash(payment)
 
-    cutoff = datetime.utcnow() - ttl
+    # DB stores naive timestamps; compare with naive UTC
+    cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - ttl
 
     result = await session.execute(
         select(DecisionCache)
@@ -93,7 +94,7 @@ async def purge_expired(session: AsyncSession) -> int:
     """Delete expired idempotency entries (call periodically from a background task)."""
     cfg = get_idempotency_cfg()
     ttl = timedelta(seconds=cfg.get("ttl_seconds", 60))
-    cutoff = datetime.utcnow() - ttl
+    cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - ttl
     result = await session.execute(
         delete(DecisionCache).where(DecisionCache.created_at < cutoff)
     )
