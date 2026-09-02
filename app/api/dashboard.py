@@ -7,7 +7,7 @@ and business cost statistics. Also mounts the SSE endpoint.
 from __future__ import annotations
 
 import json
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from fastapi import APIRouter, Depends
@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.audit.models import AuditRecord
 from app.database import get_session
+from app.decision.circuit_breaker import get_breaker
 from app.sse import broadcaster
 
 router = APIRouter()
@@ -49,6 +50,7 @@ async def get_recent_payments(
             "p_fraud": r.p_fraud,
             "reasons": json.loads(r.reasons) if r.reasons else [],
             "shadow_mode": r.shadow_mode,
+            "layer_verdicts": json.loads(r.layer_verdicts) if r.layer_verdicts else {},
         })
     return {"payments": payments}
 
@@ -88,7 +90,7 @@ async def get_stats(session: AsyncSession = Depends(get_session)) -> dict[str, A
     Cost if we allowed all vs Cost of current actions.
     (Simple MVP version based on last 24h)
     """
-    yesterday = datetime.utcnow() - timedelta(days=1)
+    yesterday = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=1)
     stmt = (
         select(AuditRecord)
         .where(AuditRecord.record_type == "DECIDED")
@@ -104,10 +106,13 @@ async def get_stats(session: AsyncSession = Depends(get_session)) -> dict[str, A
     total_volume = 0.0
     fraud_prevented = 0.0
     false_positives = 0.0
+    action_breakdown = {"CAPTURE": 0, "VERIFY": 0, "HOLD": 0}
 
     for r in records:
         amount = r.amount or 0.0
         total_volume += amount
+        if r.action in action_breakdown:
+            action_breakdown[r.action] += 1
         
         is_high_risk = r.p_fraud is not None and r.p_fraud > 0.5
         
@@ -123,6 +128,19 @@ async def get_stats(session: AsyncSession = Depends(get_session)) -> dict[str, A
         "fraud_prevented": fraud_prevented,
         "false_positives_count": false_positives,
         "total_decisions": len(records),
+        "action_breakdown": action_breakdown,
+    }
+
+
+@router.get("/breaker")
+async def get_breaker_status() -> dict[str, Any]:
+    """Return the current circuit breaker state for the dashboard panel."""
+    breaker = get_breaker()
+    status = await breaker.status()
+    return {
+        "state": status.state,
+        "hold_rate": round(status.hold_rate, 4),
+        "opened_at": status.opened_at,
     }
 
 

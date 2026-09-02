@@ -49,7 +49,6 @@ async def init_db() -> None:
     logger.info("Database initialised (SQLite WAL mode recommended for production)")
 
 
-@asynccontextmanager
 async def get_session() -> AsyncGenerator[AsyncSession, None]:
     """Async context manager yielding a database session."""
     factory = get_session_factory()

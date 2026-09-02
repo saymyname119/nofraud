@@ -1,9 +1,11 @@
 import { useEffect, useState, useCallback } from 'react';
+import './App.css';
 import { fetchPayments, fetchAuditLog, fetchStats, useSSE } from './api';
 import type { PaymentDecision, AuditRecord, CostStats } from './api';
 import { CostCounter } from './components/CostCounter';
 import { PaymentTable } from './components/PaymentTable';
 import { AuditLog } from './components/AuditLog';
+import { CircuitBreakerPanel } from './components/CircuitBreakerPanel';
 import { Shield, Activity } from 'lucide-react';
 
 function App() {
@@ -12,7 +14,6 @@ function App() {
   const [stats, setStats] = useState<CostStats | null>(null);
   const [isLive, setIsLive] = useState(true);
 
-  // Hook into the SSE stream
   const lastEventId = useSSE();
 
   const loadData = useCallback(async () => {
@@ -25,76 +26,91 @@ function App() {
       setPayments(pData);
       setAuditLogs(aData);
       setStats(sData);
+      setIsLive(true);
     } catch (err) {
       console.error("Failed to fetch dashboard data:", err);
       setIsLive(false);
     }
   }, []);
 
-  // Initial load
-  useEffect(() => {
-    loadData();
-  }, [loadData]);
+  useEffect(() => { loadData(); }, [loadData]);
 
-  // Reload data whenever a new SSE event is received
   useEffect(() => {
-    if (lastEventId) {
-      loadData();
-    }
+    if (lastEventId) loadData();
   }, [lastEventId, loadData]);
 
   return (
-    <div className="container flex-col gap-8">
-      {/* Header section */}
-      <header className="flex justify-between items-center" style={{ marginBottom: '1rem' }}>
+    <>
+      {/* ── Sticky top nav bar ── */}
+      <header className="app-header" style={{
+        boxShadow: 'none',
+        borderBottom: '1px solid var(--ant-border-subtle)',
+        paddingTop: '32px',
+        paddingBottom: '32px',
+        backgroundColor: 'transparent'
+      }}>
         <div className="flex items-center gap-4">
-          <div 
-            className="flex items-center justify-center animate-pulse" 
-            style={{ 
-              width: '48px', height: '48px', 
-              borderRadius: 'var(--radius-lg)', 
-              background: 'var(--status-info-bg)',
-              border: '1px solid var(--status-info)'
-            }}
-          >
-            <Shield size={28} className="text-info" style={{ color: 'var(--status-info)' }} />
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            background: 'transparent',
+            border: '1px solid var(--ant-border-strong)',
+            borderRadius: '4px',
+            padding: '8px'
+          }}>
+            <Shield size={24} style={{ color: 'var(--ant-primary)' }} />
           </div>
           <div>
-            <h1 className="text-3xl font-bold text-gradient">FraudSpike</h1>
-            <p className="text-secondary text-sm">Real-time Risk Intelligence & Decision Engine</p>
+            <h1
+              style={{
+                fontFamily: 'var(--font-serif)',
+                fontSize: '1.5rem',
+                fontWeight: 400,
+                letterSpacing: '0',
+                lineHeight: 1,
+                color: 'var(--ant-text)',
+                fontStyle: 'italic'
+              }}
+            >
+              FraudSpike
+            </h1>
+            <p style={{ color: 'var(--text-secondary)', fontSize: '13px', marginTop: '4px', letterSpacing: '0.02em', fontWeight: 500 }}>
+              Real-time Risk Intelligence & Decision Engine
+            </p>
           </div>
         </div>
-        
+
         <div className="flex items-center gap-2">
           {isLive ? (
-            <span className="badge success flex items-center gap-1 animate-pulse">
-              <Activity size={14} /> LIVE
+            <span className="badge success flex items-center gap-1 animate-pulse" style={{ background: 'transparent', border: '1px solid var(--status-success)', color: 'var(--status-success)' }}>
+              <Activity size={12} /> LIVE
             </span>
           ) : (
-            <span className="badge danger">DISCONNECTED</span>
+            <span className="badge danger" style={{ background: 'transparent', border: '1px solid var(--status-danger)', color: 'var(--status-danger)' }}>DISCONNECTED</span>
           )}
         </div>
       </header>
 
-      {/* Stats Section */}
-      <section className="animate-slide-up" style={{ animationDelay: '100ms' }}>
-        <CostCounter stats={stats} />
-      </section>
+      {/* ── Page content ── */}
+      <div className="container">
+        {/* Stats + Circuit Breaker row */}
+        <section className="stats-row animate-slide-up" style={{ animationDelay: '60ms' }}>
+          <div style={{ flex: '1 1 0' }}>
+            <CostCounter stats={stats} />
+          </div>
+          <div className="breaker-column">
+            <CircuitBreakerPanel refreshKey={lastEventId} />
+          </div>
+        </section>
 
-      {/* Main Grid: Table (Left, wider) and Audit Log (Right, narrower) */}
-      <section 
-        className="grid animate-slide-up" 
-        style={{ 
-          gridTemplateColumns: '2fr 1fr', 
-          gap: '2rem',
-          alignItems: 'start',
-          animationDelay: '200ms'
-        }}
-      >
-        <PaymentTable payments={payments} />
-        <AuditLog logs={auditLogs} />
-      </section>
-    </div>
+        {/* Main Grid: Table + Audit Log */}
+        <section className="main-grid animate-slide-up" style={{ animationDelay: '120ms' }}>
+          <PaymentTable payments={payments} />
+          <AuditLog logs={auditLogs} />
+        </section>
+      </div>
+    </>
   );
 }
 

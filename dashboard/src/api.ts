@@ -6,10 +6,11 @@ export interface PaymentDecision {
   payment_id: string | null;
   timestamp: string;
   amount: number | null;
-  action: 'CAPTURE' | 'VERIFY' | 'HOLD';
+  action: 'CAPTURE' | 'VERIFY' | 'HOLD' | 'PASS (shadow)' | string;
   p_fraud: number | null;
   reasons: string[];
   shadow_mode: boolean;
+  layer_verdicts: Record<string, string>;
 }
 
 export interface AuditRecord {
@@ -27,6 +28,13 @@ export interface CostStats {
   fraud_prevented: number;
   false_positives_count: number;
   total_decisions: number;
+  action_breakdown: { CAPTURE: number; VERIFY: number; HOLD: number };
+}
+
+export interface BreakerStatus {
+  state: 'OPEN' | 'CLOSED';
+  hold_rate: number;
+  opened_at: number | null;
 }
 
 const API_BASE = '/api/v1/dashboard';
@@ -51,10 +59,16 @@ export async function fetchStats(): Promise<CostStats> {
   return await res.json();
 }
 
+export async function fetchBreakerStatus(): Promise<BreakerStatus> {
+  const res = await fetch(`${API_BASE}/breaker`);
+  if (!res.ok) throw new Error('Failed to fetch breaker status');
+  return await res.json();
+}
+
 /**
  * Custom hook to listen to the SSE stream.
+ * Uses addEventListener for named events (the backend sends "event: new_payment").
  * Automatically reconnects on drop.
- * Returns a toggle to manually refetch data when an event occurs.
  */
 export function useSSE(endpoint: string = `${API_BASE}/events`) {
   const [lastEventId, setLastEventId] = useState<string | null>(null);
@@ -66,20 +80,22 @@ export function useSSE(endpoint: string = `${API_BASE}/events`) {
     const connect = () => {
       eventSource = new EventSource(endpoint);
       
-      eventSource.onmessage = (e) => {
+      // The backend broadcasts named events: "event: new_payment\ndata: ...\n\n"
+      // EventSource.onmessage only fires for UNNAMED events.
+      // Named events require addEventListener with the event name.
+      eventSource.addEventListener("new_payment", (e: MessageEvent) => {
         try {
           const data = JSON.parse(e.data);
           if (data.tx_id) {
-            setLastEventId(data.tx_id + '-' + Date.now()); // Force refresh trigger
+            setLastEventId(data.tx_id + '-' + Date.now());
           }
         } catch (err) {
           console.error("Failed to parse SSE message", err);
         }
-      };
+      });
 
       eventSource.onerror = () => {
         eventSource.close();
-        // Reconnect after 3s
         retryTimeout = setTimeout(connect, 3000);
       };
     };
