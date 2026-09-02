@@ -1,9 +1,9 @@
 thresholds:
   amount_buckets:
   - max_amount: 500
-    min_fraud_prob: 0.87
+    min_fraud_prob: 0.77
   - max_amount: 5000
-    min_fraud_prob: 0.19
+    min_fraud_prob: 0.17
   - max_amount: .inf
     min_fraud_prob: 0.5
 cost_params:
