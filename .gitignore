@@ -11,9 +11,8 @@ build/
 # Environment
 .env
 
-# ML artifacts (large files)
-ml/artifact/*.pkl
-ml/artifact/*.joblib
+# ML artifacts (uncomment if using Git LFS or external bucket storage)
+# ml/artifact/*.pkl
 
 # Database
 *.db

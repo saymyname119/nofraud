@@ -1,0 +1,14 @@
+.git
+.venv
+__pycache__
+*.pyc
+*.db
+*.db-shm
+*.db-wal
+audit_dlq.jsonl
+dashboard/node_modules
+dashboard/dist
+.idea
+.vscode
+.pytest_cache
+tests

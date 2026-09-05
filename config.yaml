@@ -39,4 +39,4 @@ audit:
   dlq_path: audit_dlq.jsonl
   genesis_sentinel: '0000000000000000000000000000000000000000000000000000000000000000'
 razorpay:
-  mock_mode: false
+  mock_mode: true

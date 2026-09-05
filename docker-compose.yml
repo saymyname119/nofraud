@@ -1,0 +1,22 @@
+services:
+  fraudspike:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: fraudspike-app
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      - APP_ENV=production
+      - LOG_LEVEL=INFO
+      - DATABASE_URL=sqlite+aiosqlite:///./fraudspike.db
+      - RAZORPAY_KEY_ID=${RAZORPAY_KEY_ID:-rzp_test_MOCK}
+      - RAZORPAY_KEY_SECRET=${RAZORPAY_KEY_SECRET:-MOCK}
+      - RAZORPAY_WEBHOOK_SECRET=${RAZORPAY_WEBHOOK_SECRET:-dummy_secret_for_local_dev}
+    volumes:
+      # Persist SQLite database and any local audit files
+      - fraudspike-data:/app/data
+
+volumes:
+  fraudspike-data:
