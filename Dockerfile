@@ -1,4 +1,4 @@
-# ── Multi-stage Docker build for FraudSpike ──────────────────────────
+# ── Multi-stage Docker build for AegisPay ──────────────────────────
 
 # Stage 1: Build the React Dashboard
 FROM node:20-alpine AS frontend-builder

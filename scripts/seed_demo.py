@@ -58,7 +58,7 @@ def main():
     args = parser.parse_args()
 
     print("\n" + "=" * 60)
-    print(" 🚀 FraudSpike Live Demo Scenario Runner")
+    print(" 🚀 AegisPay Live Demo Scenario Runner")
     print("=" * 60)
 
     # 1. Safe payment

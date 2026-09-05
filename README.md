@@ -1,6 +1,6 @@
-# FraudSpike — Real-Time Payment Fraud Defense on Razorpay
+# AegisPay — Autonomous Real-Time Payment Fraud Defense on Razorpay
 
-FraudSpike turns Razorpay's `authorize → capture` window into a smart, reversible fraud checkpoint. It scores every payment in real time (~200 ms) and only captures the funds if it is safe.
+AegisPay turns Razorpay's `authorize → capture` window into an autonomous, reversible fraud defense checkpoint. It scores every payment in real time (~200 ms) and only captures the funds if safe.
 
 Genuine customers never get falsely declined, and fraud gets held before money ever settles.
 
@@ -12,7 +12,7 @@ Genuine customers never get falsely declined, and fraud gets held before money e
 Customer Pays → Razorpay Authorizes (Funds reserved, NOT captured)
                           │
                           ▼ Webhook: payment.authorized
-                 FraudSpike Scoring API (~200ms)
+                    AegisPay Scoring API (~200ms)
                           │
         ┌─────────────────┼─────────────────┐
      LOW risk          MEDIUM risk       HIGH risk

@@ -25,18 +25,18 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
-    logger.info("Starting FraudSpike API...")
+    logger.info("Starting AegisPay API...")
     init_model("ml/artifact/model.pkl", "ml/artifact/version.json")
     await init_db()
     yield
     # Shutdown
-    logger.info("Shutting down FraudSpike API...")
+    logger.info("Shutting down AegisPay API...")
 
 
 def create_app() -> FastAPI:
     settings = get_settings()
     app = FastAPI(
-        title="FraudSpike",
+        title="AegisPay",
         version="1.0.0",
         lifespan=lifespan,
         debug=settings.app_env == "development"

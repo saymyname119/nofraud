@@ -73,10 +73,10 @@ function App() {
                 fontStyle: 'italic'
               }}
             >
-              FraudSpike
+              AegisPay
             </h1>
             <p style={{ color: 'var(--text-secondary)', fontSize: '13px', marginTop: '4px', letterSpacing: '0.02em', fontWeight: 500 }}>
-              Real-time Risk Intelligence & Decision Engine
+              Autonomous Risk Intelligence & Payment Defense
             </p>
           </div>
         </div>
